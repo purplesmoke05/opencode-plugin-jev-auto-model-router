@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+*.tgz
+.demo/
+docs/*.png.txt
+docs/*.png.ansi
