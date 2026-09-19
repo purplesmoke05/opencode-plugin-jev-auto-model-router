@@ -4,8 +4,34 @@ export type Candidate = {
   readonly variant?: string | undefined;
 };
 
+export type ContextOptions = {
+  readonly enabled: boolean;
+  readonly maxCharacters: number;
+};
+
+export type TaskContext = {
+  readonly previous_assistant?: string;
+  readonly truncated: boolean;
+};
+
+export type SessionPin = {
+  readonly model: string;
+  readonly variant?: string | undefined;
+  readonly reason: string;
+  readonly recovery?: boolean;
+  readonly confidence?: number;
+};
+
+export type SessionPins = {
+  readonly load: (sessionID: string) => Promise<SessionPin | undefined>;
+  readonly claim: (sessionID: string, pin: SessionPin) => Promise<SessionPin>;
+  readonly replace: (sessionID: string, pin: SessionPin) => Promise<void>;
+  readonly forget: (sessionID: string) => Promise<void>;
+};
+
 export type DecisionRequest = {
   readonly prompt: string;
+  readonly context?: TaskContext;
   readonly candidates: readonly Candidate[];
   readonly apiKey: string;
   readonly timeoutMs: number;

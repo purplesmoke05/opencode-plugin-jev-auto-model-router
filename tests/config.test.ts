@@ -16,10 +16,24 @@ describe("configuration boundary", () => {
     // When
     const parsed = parseOptions(input);
     // Then
-    expect(parsed).toMatchObject({ agents: ["build", "quick"], confidenceThreshold: 0.7 });
+    expect(parsed).toMatchObject({
+      mode: "auto",
+      agents: ["build", "quick"],
+      confidenceThreshold: 0.7,
+    });
+  });
+
+  test.each(["auto", "force"])("accepts explicit routing mode %s", (mode) => {
+    const input = { ...options, mode };
+    const parsed = parseOptions(input);
+    expect(parsed).toMatchObject({ mode });
   });
 
   test.each([
+    { ...options, mode: "forced" },
+    { ...options, mode: "FORCE" },
+    { ...options, mode: null },
+    { ...options, mode: true },
     { ...options, fallback: "other/model" },
     { ...options, candidates: [] },
     { ...options, candidates: [...options.candidates, options.candidates[0]] },

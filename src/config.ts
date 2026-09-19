@@ -16,6 +16,9 @@ const modelRef = z
 
 const optionsSchema = z
   .strictObject({
+    mode: z.enum(["auto", "force"]).default("auto"),
+    sticky: z.boolean().default(true),
+    stickyConfidenceThreshold: z.number().min(0).max(1).default(0.99),
     candidates: z
       .array(
         z.strictObject({
@@ -31,6 +34,12 @@ const optionsSchema = z
     confidenceThreshold: z.number().min(0).max(1).default(0.7),
     timeoutMs: z.number().int().min(100).max(30000).default(5000),
     maxPromptChars: z.number().int().min(100).max(32000).default(12000),
+    context: z
+      .strictObject({
+        enabled: z.boolean().default(true),
+        maxCharacters: z.number().int().min(1024).max(24000).default(4000),
+      })
+      .default({ enabled: true, maxCharacters: 4000 }),
     notify: z.boolean().default(true),
   })
   .superRefine((options, context) => {
