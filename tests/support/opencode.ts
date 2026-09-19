@@ -14,7 +14,11 @@ export class HarnessError extends Error {
   override readonly name = "HarnessError";
 }
 
-export async function isolatedOpenCode(endpoint: URL) {
+export async function isolatedOpenCode(
+  endpoint: URL,
+  mode: "auto" | "force" = "auto",
+  contextEnabled = true,
+) {
   await mkdir("/tmp/opencode", { recursive: true });
   const root = await mkdtemp("/tmp/opencode/jev-e2e-");
   const cwd = join(root, "work");
@@ -70,6 +74,8 @@ export async function isolatedOpenCode(endpoint: URL) {
           {
             endpoint: new URL("jev", endpoint).href,
             router: {
+              mode,
+              context: { enabled: contextEnabled },
               candidates: [
                 { model: "mock/fast", description: "Simple" },
                 { model: "mock/strong", description: "Hard" },
@@ -92,8 +98,12 @@ export async function isolatedOpenCode(endpoint: URL) {
           models: { fast: model, strong: model },
         },
       },
-      agent: { title: { disable: true }, summary: { disable: true } },
-      permission: "deny",
+      agent: {
+        title: { disable: true },
+        summary: { disable: true },
+        explore: { model: "mock/strong" },
+      },
+      permission: { "*": "deny", task: "allow" },
       share: "disabled",
       autoupdate: false,
       snapshot: false,
@@ -142,7 +152,13 @@ export async function isolatedOpenCode(endpoint: URL) {
     cwd,
     env,
     command,
-    async turn(selection: { readonly model?: string; readonly sessionID?: string } = {}) {
+    async turn(
+      selection: {
+        readonly model?: string;
+        readonly sessionID?: string;
+        readonly prompt?: string;
+      } = {},
+    ) {
       const args = [
         "run",
         "--print-logs",
@@ -157,7 +173,7 @@ export async function isolatedOpenCode(endpoint: URL) {
       ];
       if (selection.model) args.push("-m", selection.model);
       if (selection.sessionID) args.push("--session", selection.sessionID);
-      args.push("Reply with a short greeting.");
+      args.push(selection.prompt ?? "Reply with a short greeting.");
       const output = await command(args);
       const events = output.stdout
         .trim()

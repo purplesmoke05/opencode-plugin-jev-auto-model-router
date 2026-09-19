@@ -2,7 +2,16 @@ import { z } from "zod";
 
 const classification = z.object({
   model: z.literal("jev-latest"),
-  state: z.string(),
+  state: z.union([
+    z.string(),
+    z.object({
+      current_request: z.string(),
+      task_context: z.object({
+        previous_assistant: z.string().optional(),
+        truncated: z.boolean(),
+      }),
+    }),
+  ]),
   questions: z.object({
     route: z.object({ type: z.literal("choice"), criteria: z.record(z.string(), z.string()) }),
   }),
@@ -18,7 +27,14 @@ export function startBackends() {
   const completions: z.infer<typeof completion>[] = [];
   const rejected: string[] = [];
   const unattributed: string[] = [];
-  const behavior = { rateLimited: false, rateLimitAfterFirst: false };
+  const behavior = {
+    rateLimited: false,
+    rateLimitAfterFirst: false,
+    delegate: false,
+    omoTask: false,
+    contextual: false,
+    confidence: 0.99,
+  };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -43,7 +59,8 @@ export function startBackends() {
       switch (pathname) {
         case "/jev": {
           const payload: unknown = await request.json();
-          classifications.push(classification.parse(payload));
+          const classified = classification.parse(payload);
+          classifications.push(classified);
           if (
             behavior.rateLimited ||
             (behavior.rateLimitAfterFirst && classifications.length > 1)
@@ -56,13 +73,17 @@ export function startBackends() {
               },
             );
           }
+          const contextualFollowup =
+            behavior.contextual &&
+            typeof classified.state !== "string" &&
+            Boolean(classified.state.task_context.previous_assistant);
           return Response.json({
             answers: {
               route: {
                 type: "choice",
-                choice: "c0",
-                confidence: 0.99,
-                probabilities: { c0: 0.99, c1: 0.01 },
+                choice: contextualFollowup ? "c1" : "c0",
+                confidence: behavior.confidence,
+                probabilities: contextualFollowup ? { c0: 0.01, c1: 0.99 } : { c0: 0.99, c1: 0.01 },
               },
             },
           });
@@ -77,6 +98,48 @@ export function startBackends() {
             created: 1,
             model: body.model,
           };
+          if (behavior.delegate && completions.length === 1) {
+            const chunks = [
+              {
+                ...envelope,
+                choices: [
+                  {
+                    index: 0,
+                    delta: {
+                      role: "assistant",
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: "call_delegate",
+                          type: "function",
+                          function: {
+                            name: "task",
+                            arguments: JSON.stringify({
+                              subagent_type: "explore",
+                              description: "Locate a function",
+                              prompt:
+                                "Locate the greeting function. Reply briefly without using tools.",
+                              ...(behavior.omoTask
+                                ? { run_in_background: false, load_skills: [] }
+                                : {}),
+                            }),
+                          },
+                        },
+                      ],
+                    },
+                    finish_reason: null,
+                  },
+                ],
+              },
+              { ...envelope, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+            ];
+            return new Response(
+              `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`,
+              {
+                headers: { "Content-Type": "text/event-stream" },
+              },
+            );
+          }
           const chunks = [
             {
               ...envelope,

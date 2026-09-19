@@ -54,7 +54,7 @@ describe.skipIf(process.env["OPENCODE_E2E"] !== "1")("real OpenCode 1.18.31", ()
     expect(backend.rejected).toEqual([]);
   }, 60_000);
 
-  test("reclassifies the next turn when the same session retains Auto", async () => {
+  test("keeps the pin across process restarts without a second classification", async () => {
     await using backend = startBackends();
     await using cli = await isolatedOpenCode(backend.url);
     const first = await cli.turn({ model: "jev-router/auto" });
@@ -64,8 +64,8 @@ describe.skipIf(process.env["OPENCODE_E2E"] !== "1")("real OpenCode 1.18.31", ()
     const events = await cli.turn({ sessionID });
 
     expect(events.every((event) => event.sessionID === sessionID)).toBe(true);
-    expect(backend.classifications).toHaveLength(2);
-    expect(backend.completions.map((request) => request.model)).toEqual(["fast", "strong"]);
+    expect(backend.classifications).toHaveLength(1);
+    expect(backend.completions.map((request) => request.model)).toEqual(["fast", "fast"]);
     expect(backend.rejected).toEqual([]);
   }, 120_000);
 });
