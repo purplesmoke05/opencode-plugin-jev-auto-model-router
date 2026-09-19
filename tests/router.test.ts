@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseOptions } from "../src/config.js";
 import type { DecisionRequest, DecisionResult } from "../src/contracts.js";
-import { createRouter, type RouteTurn } from "../src/router.js";
+import { createRouter, type RouteTurn, RoutingError } from "../src/router.js";
 
 const options = parseOptions({
   candidates: [
@@ -60,6 +60,9 @@ describe("per-turn routing policy", () => {
   test.each([
     [{ ...turn, child: true }, "scope-fallback"],
     [{ ...turn, agent: "explore" }, "scope-fallback"],
+    [{ ...turn, agent: "title" }, "scope-fallback"],
+    [{ ...turn, agent: "summary" }, "scope-fallback"],
+    [{ ...turn, agent: "compaction" }, "scope-fallback"],
     [{ ...turn, synthetic: true }, "synthetic-fallback"],
     [{ ...turn, prompt: "" }, "empty-prompt"],
     [{ ...turn, prompt: "a".repeat(12001) }, "prompt-too-long"],
@@ -145,4 +148,132 @@ describe("per-turn routing policy", () => {
     expect(result).toMatchObject({ model: "b/strong", status: 429, retryAfter: "60" });
     expect(calls).toBe(1);
   });
+});
+
+describe("forced routing policy", () => {
+  test.each([
+    { ...turn, auto: false },
+    { ...turn, auto: false, child: true },
+    { ...turn, overridden: true },
+    { ...turn, child: true },
+    { ...turn, agent: "explore" },
+    { ...turn, retry: false },
+  ])("classifies ordinary turns regardless of model or scope %#", async (input) => {
+    let calls = 0;
+    const router = createRouter(
+      parseOptions({ ...options, mode: "force", agents: ["plan"] }),
+      async () => {
+        calls++;
+        return selection;
+      },
+    );
+    const result = await router({ turn: input, available, apiKey: "test" });
+    expect(result).toMatchObject({ kind: "route", model: "a/fast", reason: "jev" });
+    expect(calls).toBe(1);
+  });
+
+  test.each([
+    { ...turn, synthetic: true },
+    { ...turn, retry: true },
+    { ...turn, agent: "title" },
+    { ...turn, agent: "summary" },
+    { ...turn, agent: "compaction" },
+  ])("skips excluded turns without classification or fallback validation %#", async (input) => {
+    let calls = 0;
+    const router = createRouter(
+      parseOptions({ ...options, mode: "force", agents: [input.agent] }),
+      async () => {
+        calls++;
+        return selection;
+      },
+    );
+    const result = await router({ turn: input, available: [], apiKey: "" });
+    expect(result).toEqual({ kind: "skip" });
+    expect(calls).toBe(0);
+  });
+});
+
+describe.each(["auto", "force"] as const)("shared %s routing contracts", (mode) => {
+  test.each([{ available }, { available: [] }])("preserves flagged retries %#", async (catalog) => {
+    let calls = 0;
+    const router = createRouter(parseOptions({ ...options, mode }), async () => {
+      calls++;
+      return selection;
+    });
+    const input: RouteTurn = { ...turn, retry: true };
+    const result = await router({ turn: input, available: catalog.available, apiKey: "test" });
+    expect(result).toEqual({ kind: "skip" });
+    expect(calls).toBe(0);
+  });
+
+  test.each([
+    [{ kind: "selected", model: "a/fast", confidence: 0.2 }, "low-confidence"],
+    [{ kind: "selected", model: "unlisted/model", confidence: 1 }, "invalid-choice"],
+    [{ kind: "unavailable", reason: "timeout" }, "timeout"],
+  ] as const)(
+    "retains fallback selection when the decision is unusable: %s",
+    async (decision, reason) => {
+      const router = createRouter(parseOptions({ ...options, mode }), async () => decision);
+      const result = await router({ turn, available, apiKey: "test" });
+      expect(result).toMatchObject({ kind: "route", model: "b/strong", variant: "high", reason });
+    },
+  );
+
+  test.each([
+    [turn, "", "missing-key"],
+    [{ ...turn, prompt: "" }, "test", "empty-prompt"],
+    [{ ...turn, prompt: "a".repeat(12001) }, "test", "prompt-too-long"],
+  ] as const)(
+    "falls back without classification for invalid request inputs %#",
+    async (input, apiKey, reason) => {
+      let calls = 0;
+      const router = createRouter(parseOptions({ ...options, mode }), async () => {
+        calls++;
+        return selection;
+      });
+      const result = await router({ turn: input, available, apiKey });
+      expect(result).toMatchObject({ model: "b/strong", reason });
+      expect(calls).toBe(0);
+    },
+  );
+
+  test.each([
+    { available: [] },
+    { available: [{ model: "b/strong", toolcall: false, modalities: ["text"] }] },
+    { available: [{ model: "b/strong", toolcall: true, modalities: ["image"] }] },
+  ])("blocks when the configured fallback is ineligible %#", async (catalog) => {
+    const router = createRouter(parseOptions({ ...options, mode }), async () => selection);
+    await expect(
+      router({ turn, available: catalog.available, apiKey: "test" }),
+    ).rejects.toBeInstanceOf(RoutingError);
+  });
+
+  test("filters incompatible candidates before classification", async () => {
+    let sent: DecisionRequest | undefined;
+    const router = createRouter(parseOptions({ ...options, mode }), async (request) => {
+      sent = request;
+      return { kind: "selected", model: "b/strong", confidence: 1 };
+    });
+    const result = await router({
+      turn: { ...turn, modalities: ["image"] },
+      available,
+      apiKey: "test",
+    });
+    expect(sent?.candidates.map((candidate) => candidate.model)).toEqual(["b/strong"]);
+    expect(result).toMatchObject({ model: "b/strong", variant: "high", reason: "jev" });
+  });
+});
+
+test("respects the configured agent allowlist in auto mode", async () => {
+  let calls = 0;
+  const router = createRouter(
+    parseOptions({ ...options, mode: "auto", agents: ["plan"] }),
+    async () => {
+      calls++;
+      return selection;
+    },
+  );
+  const result = await router({ turn, available, apiKey: "test" });
+  expect(result).toMatchObject({ model: "b/strong", reason: "scope-fallback" });
+  expect(calls).toBe(0);
 });
