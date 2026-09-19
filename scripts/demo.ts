@@ -4,7 +4,10 @@ import { isolatedOpenCode } from "../tests/support/opencode.js";
 await using backend = startBackends();
 backend.behavior.rateLimited = process.argv.includes("--fallback");
 backend.behavior.rateLimitAfterFirst = process.argv.includes("--second-fallback");
-await using cli = await isolatedOpenCode(backend.url);
+await using cli = await isolatedOpenCode(
+  backend.url,
+  process.argv.includes("--force") ? "force" : "auto",
+);
 const child = Bun.spawn(
   [process.env["OPENCODE_E2E_BINARY"] ?? "opencode", "-m", "jev-router/auto"],
   {

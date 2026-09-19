@@ -1,7 +1,7 @@
 {
   "name": "opencode-plugin-jev-auto-model-router",
   "version": "0.1.0",
-  "description": "An opt-in Auto (Jev) model for OpenCode: route each user turn to your configured model allowlist.",
+  "description": "Jev model routing for OpenCode with opt-in or forced selection and persistent per-session model affinity.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -32,7 +32,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",
-    "test:e2e": "OPENCODE_E2E=1 bun test tests/e2e.test.ts",
+    "test:e2e": "OPENCODE_E2E=1 bun test tests/e2e.test.ts tests/force-e2e.test.ts tests/context-e2e.test.ts",
     "demo": "bun run scripts/demo.ts",
     "lint": "biome check .",
     "check": "bun run lint && bun run typecheck && bun run test && bun run build",
