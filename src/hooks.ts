@@ -6,15 +6,24 @@ import {
   type RouterOptions,
   splitModel,
 } from "./config.js";
-import type { Decide } from "./contracts.js";
+import type { Decide, SessionPins, TaskContext } from "./contracts.js";
+import { inspectMessage } from "./message-policy.js";
 import { attachmentModalities } from "./modalities.js";
-import { type AvailableModel, createRouter, type RouteResult, RoutingError } from "./router.js";
+import { type AvailableModel, type RouteResult, RoutingError } from "./router.js";
+import { createMemorySessionPins } from "./session-pins.js";
+import { createSessionRouter } from "./session-router.js";
 
 export type Host = {
+  readonly pins?: SessionPins;
   readonly models: () => Promise<readonly AvailableModel[]>;
   readonly session: (
     id: string,
-  ) => Promise<{ readonly child: boolean; readonly modalities: readonly string[] }>;
+    currentMessageID?: string,
+  ) => Promise<{
+    readonly child: boolean;
+    readonly modalities: readonly string[];
+    readonly context?: TaskContext;
+  }>;
   readonly report: (
     sessionID: string,
     result: Extract<RouteResult, { kind: "route" }>,
@@ -23,7 +32,7 @@ export type Host = {
 };
 
 export function createHooks(host: Host, options: RouterOptions, decide: Decide): Hooks {
-  const route = createRouter(options, decide);
+  const sessions = createSessionRouter(options, decide, host.pins ?? createMemorySessionPins());
   return {
     config: async (config) => {
       if (config.provider?.[AUTO_PROVIDER]) {
@@ -56,29 +65,51 @@ export function createHooks(host: Host, options: RouterOptions, decide: Decide):
       };
     },
     "chat.message": async (input, output) => {
+      const auto =
+        output.message.model.providerID === AUTO_PROVIDER &&
+        output.message.model.modelID === AUTO_MODEL;
+      const forced = options.mode === "force";
+      const initial = inspectMessage(output.parts);
+      if (initial.retry) {
+        if (!auto) {
+          const variant =
+            "variant" in output.message.model && typeof output.message.model.variant === "string"
+              ? output.message.model.variant
+              : undefined;
+          await sessions.recover(input.sessionID, {
+            model: `${output.message.model.providerID}/${output.message.model.modelID}`,
+            variant,
+            reason: "runtime-recovery",
+            recovery: true,
+          });
+        }
+        return;
+      }
+      if (!forced && !auto) return;
       if (
-        output.message.model.providerID !== AUTO_PROVIDER ||
-        output.message.model.modelID !== AUTO_MODEL
+        forced &&
+        ((initial.synthetic && !initial.hasTaskText) ||
+          ["title", "summary", "compaction"].includes(output.message.agent))
       )
         return;
-      const session = await host.session(input.sessionID);
-      const texts = output.parts.filter(
-        (part) => part.type === "text" && !part.synthetic && !part.ignored,
-      );
-      const result = await route({
+      const session = await host.session(input.sessionID, output.message.id);
+      const message = inspectMessage(output.parts, forced && session.child);
+      if (forced && message.synthetic) return;
+      const result = await sessions.route({
+        sessionID: input.sessionID,
         turn: {
-          auto: true,
+          auto,
           overridden: false,
           agent: output.message.agent,
           child: session.child,
-          synthetic: texts.length === 0,
-          prompt: texts.map((part) => (part.type === "text" ? part.text : "")).join("\n"),
+          ...message,
           modalities: [
             ...new Set(["text", ...session.modalities, ...attachmentModalities(output.parts)]),
           ],
         },
         available: await host.models(),
         apiKey: host.apiKey(),
+        ...(session.context ? { context: session.context } : {}),
       });
       switch (result.kind) {
         case "skip":
@@ -97,6 +128,9 @@ export function createHooks(host: Host, options: RouterOptions, decide: Decide):
           return unreachable;
         }
       }
+    },
+    event: async ({ event }) => {
+      if (event.type === "session.deleted") await sessions.forget(event.properties.info.id);
     },
   };
 }

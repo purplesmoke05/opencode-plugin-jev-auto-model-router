@@ -23,6 +23,27 @@ function hostFor(handler: (request: Request) => Response | Promise<Response>) {
 }
 
 describe("OpenCode SDK boundary", () => {
+  test("does not round a sub-threshold confidence up to 99 percent", async () => {
+    const bodies: unknown[] = [];
+    const host = hostFor(async (request) => {
+      bodies.push(await request.json());
+      return Response.json(true);
+    });
+    await host.report("session", {
+      kind: "route",
+      model: "connected/m",
+      reason: "jev",
+      confidence: 0.989,
+      pinned: false,
+    });
+    expect(bodies).toContainEqual({
+      title: "Auto (Jev)",
+      message: "connected/m\nJev confidence 98.9% · not pinned yet",
+      variant: "info",
+      duration: 6000,
+    });
+  });
+
   test("offers only connected provider models", async () => {
     // Given
     const host = hostFor(() =>
@@ -44,7 +65,7 @@ describe("OpenCode SDK boundary", () => {
     ]);
   });
 
-  test("collects attachment requirements from history without exposing text", async () => {
+  test("collects attachment requirements alongside bounded conversation context", async () => {
     // Given
     const host = hostFor((request) =>
       Response.json(
@@ -65,7 +86,7 @@ describe("OpenCode SDK boundary", () => {
     // When
     const session = await host.session("session");
     // Then
-    expect(session).toEqual({ child: true, modalities: ["image", "pdf"] });
+    expect(session).toMatchObject({ child: true, modalities: ["image", "pdf"] });
   });
 
   test("reports only routing metadata and distinguishes missing Retry-After", async () => {
@@ -88,7 +109,13 @@ describe("OpenCode SDK boundary", () => {
       service: "jev-auto-model-router",
       level: "warn",
       message: "model route selected",
-      extra: { sessionID: "session", model: "connected/m", reason: "http-error", status: 429 },
+      extra: {
+        sessionID: "session",
+        mode: "auto",
+        model: "connected/m",
+        reason: "http-error",
+        status: 429,
+      },
     });
     expect(bodies).toContainEqual({
       title: "Auto (Jev)",
