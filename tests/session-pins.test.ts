@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionPin, SessionPins } from "../src/contracts.js";
 import {
@@ -13,7 +14,7 @@ const first: SessionPin = { model: "provider/first", variant: "high", reason: "j
 const recovery: SessionPin = { model: "other/recovery", reason: "omo-recovery", recovery: true };
 
 async function directory() {
-  const root = await mkdtemp("/tmp/opencode/session-pins-");
+  const root = await mkdtemp(join(tmpdir(), "jev-session-pins-"));
   roots.push(root);
   return join(root, "pins");
 }
