@@ -19,6 +19,22 @@ const optionsSchema = z
     mode: z.enum(["auto", "force"]).default("auto"),
     sticky: z.boolean().default(true),
     stickyConfidenceThreshold: z.number().min(0).max(1).default(0.99),
+    executionFallbacks: z
+      .array(
+        z.strictObject({
+          models: z
+            .array(
+              z.strictObject({
+                model: modelRef,
+                variant: z.string().min(1).max(80).optional(),
+              }),
+            )
+            .min(2)
+            .max(8),
+        }),
+      )
+      .max(8)
+      .default([]),
     candidates: z
       .array(
         z.strictObject({
@@ -43,6 +59,16 @@ const optionsSchema = z
     notify: z.boolean().default(true),
   })
   .superRefine((options, context) => {
+    const executionModels = options.executionFallbacks.flatMap((chain) =>
+      chain.models.map((entry) => entry.model),
+    );
+    if (new Set(executionModels).size !== executionModels.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["executionFallbacks"],
+        message: "Execution fallback chains must not contain duplicate or overlapping models",
+      });
+    }
     const models = new Set(options.candidates.map((candidate) => candidate.model));
     if (models.size !== options.candidates.length) {
       context.addIssue({

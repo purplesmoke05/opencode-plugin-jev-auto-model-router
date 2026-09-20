@@ -47,3 +47,50 @@ export type DecisionResult =
     };
 
 export type Decide = (request: DecisionRequest) => Promise<DecisionResult>;
+
+export type ExecutionTarget = { readonly model: string; readonly variant?: string | undefined };
+export type ExecutionSnapshot = {
+  readonly sessionID: string;
+  readonly userID: string;
+  readonly assistantID: string;
+  readonly model: string;
+  readonly agent: string;
+  readonly idle: boolean;
+  readonly blocked: boolean;
+  readonly complete: boolean;
+  readonly failed: boolean;
+  readonly retryable: boolean;
+  readonly status?: number;
+  readonly retryAfter?: string;
+  readonly modalities: readonly string[];
+  readonly requestOptions: {
+    readonly tools?: Readonly<Record<string, boolean>>;
+    readonly system?: string;
+    readonly format?: unknown;
+  };
+};
+export type ExecutionModel = {
+  readonly model: string;
+  readonly toolcall: boolean;
+  readonly modalities: readonly string[];
+  readonly variants?: readonly string[];
+};
+export type ExecutionNotice = {
+  readonly action: "retry" | "recovered" | "exhausted" | "stopped";
+  readonly reason: string;
+  readonly from?: string;
+  readonly to?: string;
+  readonly status?: number;
+  readonly retryAfter?: string;
+};
+export type ExecutionHost = {
+  readonly inspect: (sessionID: string) => Promise<ExecutionSnapshot | undefined>;
+  readonly models: () => Promise<readonly ExecutionModel[]>;
+  readonly dispatch: (
+    snapshot: ExecutionSnapshot,
+    target: ExecutionTarget,
+    token: string,
+  ) => Promise<void>;
+  readonly report: (sessionID: string, notice: ExecutionNotice) => Promise<void>;
+  readonly recovered: (sessionID: string, target: ExecutionTarget) => Promise<void>;
+};
