@@ -6,7 +6,8 @@ import {
   type RouterOptions,
   splitModel,
 } from "./config.js";
-import type { Decide, SessionPins, TaskContext } from "./contracts.js";
+import type { Decide, ExecutionHost, SessionPins, TaskContext } from "./contracts.js";
+import { withExecutionFallbacks } from "./execution-hooks.js";
 import { inspectMessage } from "./message-policy.js";
 import { attachmentModalities } from "./modalities.js";
 import { type AvailableModel, type RouteResult, RoutingError } from "./router.js";
@@ -14,6 +15,7 @@ import { createMemorySessionPins } from "./session-pins.js";
 import { createSessionRouter } from "./session-router.js";
 
 export type Host = {
+  readonly execution?: Pick<ExecutionHost, "inspect" | "dispatch" | "report">;
   readonly pins?: SessionPins;
   readonly models: () => Promise<readonly AvailableModel[]>;
   readonly session: (
@@ -33,7 +35,7 @@ export type Host = {
 
 export function createHooks(host: Host, options: RouterOptions, decide: Decide): Hooks {
   const sessions = createSessionRouter(options, decide, host.pins ?? createMemorySessionPins());
-  return {
+  const hooks: Hooks = {
     config: async (config) => {
       if (config.provider?.[AUTO_PROVIDER]) {
         throw new ConfigurationError(
@@ -133,4 +135,18 @@ export function createHooks(host: Host, options: RouterOptions, decide: Decide):
       if (event.type === "session.deleted") await sessions.forget(event.properties.info.id);
     },
   };
+  if (!options.executionFallbacks.length) return hooks;
+  if (!host.execution) throw new ConfigurationError("Execution fallback transport is unavailable");
+  return withExecutionFallbacks(hooks, options, {
+    ...host.execution,
+    models: host.models,
+    recovered: (sessionID, target) =>
+      sessions.recover(
+        sessionID,
+        { ...target, reason: "execution-fallback", recovery: true },
+        options.executionFallbacks
+          .find((chain) => chain.models.some((model) => model.model === target.model))
+          ?.models.map((model) => model.model) ?? [],
+      ),
+  });
 }

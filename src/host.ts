@@ -4,6 +4,7 @@ import type { PluginInput } from "@opencode-ai/plugin";
 import { z } from "zod";
 import type { RouterOptions } from "./config.js";
 import { buildTaskContext } from "./context.js";
+import { createExecutionHost } from "./execution-host.js";
 import type { Host } from "./hooks.js";
 import { attachmentModalities } from "./modalities.js";
 import { RoutingError } from "./router.js";
@@ -17,6 +18,7 @@ const catalogSchema = z.object({
       models: z.record(
         z.string(),
         z.object({
+          variants: z.record(z.string(), z.unknown()).optional(),
           capabilities: z.object({
             toolcall: z.boolean(),
             input: z.record(z.string(), z.boolean()),
@@ -33,6 +35,7 @@ export function createHost(
 ): Host {
   const { client, directory } = input;
   return {
+    execution: createExecutionHost(input, options),
     pins: createSessionPins(
       join(
         process.env["XDG_STATE_HOME"] ?? join(homedir(), ".local", "state"),
@@ -57,6 +60,7 @@ export function createHost(
             modalities: Object.entries(model.capabilities.input)
               .filter(([, supported]) => supported)
               .map(([modality]) => modality),
+            ...(model.variants ? { variants: Object.keys(model.variants) } : {}),
           })),
         );
     },
