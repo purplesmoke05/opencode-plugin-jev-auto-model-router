@@ -73,9 +73,12 @@ export function createSessionRouter(options: RouterOptions, decide: Decide, pins
           ? { ...result, pinned: true }
           : selected;
       }),
-    recover: (sessionID: string, pin: SessionPin) =>
+    recover: (sessionID: string, pin: SessionPin, onlyFrom?: readonly string[]) =>
       serialize(sessionID, async () => {
-        if (options.sticky && (await pins.load(sessionID))) await pins.replace(sessionID, pin);
+        if (!options.sticky) return;
+        const existing = await pins.load(sessionID);
+        if (existing && (!onlyFrom || onlyFrom.includes(existing.model)))
+          await pins.replace(sessionID, pin);
       }),
     forget: (sessionID: string) => serialize(sessionID, () => pins.forget(sessionID)),
   };

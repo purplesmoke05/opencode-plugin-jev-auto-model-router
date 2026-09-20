@@ -16,6 +16,7 @@ export type AvailableModel = {
   readonly model: string;
   readonly toolcall: boolean;
   readonly modalities: readonly string[];
+  readonly variants?: readonly string[];
 };
 
 export type RouteResult =
