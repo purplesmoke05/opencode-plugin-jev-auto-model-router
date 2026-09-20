@@ -154,6 +154,56 @@ logs include the configured mode.
 
 ## Configuration
 
+### Execution-error provider chains
+
+`executionFallbacks` is separate from the classifier's `fallback`. It is empty
+by default. Each configured chain is matched against the **actual failed
+assistant model**, not the agent/category's configured default:
+
+```json
+"executionFallbacks": [
+  {
+    "models": [
+      { "model": "provider-a/model", "variant": "max" },
+      { "model": "provider-b/model", "variant": "max" },
+      { "model": "provider-c/model", "variant": "max" }
+    ]
+  }
+]
+```
+
+Only retryable `APIError` failures, HTTP 429, and HTTP 5xx qualify. User aborts,
+authentication errors, malformed requests, token-limit errors, busy sessions,
+and pending questions/permissions do not. OpenCode's built-in same-provider
+retries may run before this plugin observes a final error.
+
+The chain advances strictly forward and never wraps. Each destination is used
+at most once for that request; disconnected, incompatible, or variant-missing
+destinations are skipped. No provider key is copied or read by this feature:
+OpenCode's existing provider authentication is used. `Retry-After` from the
+failed request is logged when available; the plugin does not repeat requests
+to the failed provider or claim a guaranteed recovery time.
+
+Recovery sends a synthetic continuation in the same session, with the target
+model/variant and original agent, per-message tool restrictions, system text,
+and output format. It retains conversation/tool results instead of replaying
+the original user prompt. Only after a successful destination response does an
+existing session pin move to that destination. If all destinations fail, normal
+error handling remains; no new user task is invented. Unlisted models are not
+affected.
+
+Use `/jev-fallback-stop` or `/stop-continuation` to cancel pending recovery.
+New messages invalidate stale retries, and injected retries carry a one-use
+token checked by the message hook. OpenCode has no atomic submit-if-idle API,
+so do not enable multiple independent execution-retry owners for the same
+session. **Disable OMO `runtime_fallback` and `model_fallback` when this plugin
+owns execution recovery.** This plugin does not change OMO settings itself.
+If you already use OMO fallback chains for other models, migrate or scope that
+configuration deliberately rather than assuming it remains unchanged.
+
+All chain models and variants must exist in the connected OpenCode catalog.
+This option does not automatically register providers or invent model aliases.
+
 Register the plugin in `opencode.json` / `opencode.jsonc` as a tuple with your
 options:
 
@@ -190,6 +240,7 @@ candidate providers there. This plugin does not change that allowlist.
 | `mode` | `"auto"` | `"auto"` respects model selection; `"force"` overrides ordinary main and delegated task model choices. |
 | `sticky` | `true` | Pin the first qualifying Jev choice per session; no Jev calls after pinning. |
 | `stickyConfidenceThreshold` | `0.99` | Minimum unrounded Jev confidence to create a new pin. Fallbacks never qualify. |
+| `executionFallbacks` | `[]` | Optional ordered model/variant chains for retryable execution failures. Separate from Jev decision fallback. |
 | `agents` | `["build", "quick"]` | In auto mode, agent names Auto may route. Ignored in force mode. |
 | `confidenceThreshold` | `0.7` | Minimum Jev confidence to accept a choice. |
 | `timeoutMs` | `5000` | Client-side budget for the Jev request. |
@@ -359,6 +410,7 @@ bun run test        # bun test tests
 bun run build       # tsc -p tsconfig.build.json
 bun run check       # lint + typecheck + test + build
 bun run test:e2e    # real OpenCode 1.18.31 + local mock HTTP/SSE servers
+bun run test:execution-e2e # real server: provider failures, max payloads, finite chain, aborts
 bun run demo        # isolated interactive TUI; no real credentials or provider calls
 ```
 
